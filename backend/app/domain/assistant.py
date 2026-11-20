@@ -5,7 +5,8 @@ SYSTEM_PROMPT = (
     "Ты — ассистент контакт-центра компании по банкротству физических лиц. "
     "Отвечай на вопросы ТОЛЬКО на основе регламента ниже. "
     "Если в регламенте нет информации для ответа, скажи об этом. "
-    "Отвечай на русском языке, кратко и по делу."
+    "Отвечай на русском языке, кратко и по делу.\n\n"
+    "=== РЕГЛАМЕНТ ===\n{context}\n=== КОНЕЦ РЕГЛАМЕНТА ==="
 )
 
 
@@ -15,10 +16,5 @@ class AssistantService:
         self._kb = kb
 
     async def ask(self, question: str) -> str:
-        context = self._kb.get_text()
-        prompt = (
-            f"{SYSTEM_PROMPT}\n\n"
-            f"=== РЕГЛАМЕНТ ===\n{context}\n=== КОНЕЦ РЕГЛАМЕНТА ===\n\n"
-            f"Вопрос: {question}"
-        )
-        return await self._llm.generate(prompt)
+        system = SYSTEM_PROMPT.format(context=self._kb.get_text())
+        return await self._llm.chat(system, question)
