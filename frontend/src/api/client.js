@@ -1,6 +1,6 @@
 const API_URL = import.meta.env.VITE_API_URL || "";
 
-export async function sendQuestionStream(question, onStatus) {
+export async function sendQuestionStream(question, { onStatus, onEstimate }) {
   const resp = await fetch(`${API_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -32,6 +32,10 @@ export async function sendQuestionStream(question, onStatus) {
 
         if (event.type === "log" && onStatus) {
           onStatus(event.message);
+        }
+
+        if (event.type === "estimate" && onEstimate) {
+          onEstimate(parseInt(event.message, 10));
         }
 
         if (event.type === "done") {

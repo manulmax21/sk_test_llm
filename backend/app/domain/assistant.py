@@ -16,33 +16,45 @@ SYSTEM_PROMPT = (
     "4. Отвечай на русском, кратко — 2-4 предложения."
 )
 
+CTX_LIMIT = 4096
+TOKENS_PER_CHAR = 0.4
+
 
 class AssistantService:
     def __init__(self, llm: OllamaClient, kb: KnowledgeBase) -> None:
         self._llm = llm
         self._kb = kb
 
-    async def ask(self, question: str) -> tuple[str, list[str]]:
-        logs: list[str] = []
+    def _estimate(self, question: str) -> dict:
+        q_tokens = int(len(question) * TOKENS_PER_CHAR)
+        system_tokens = int(len(SYSTEM_PROMPT) * TOKENS_PER_CHAR)
 
-        logs.append(f"Вопрос: {question[:100]}")
-        context = self._kb.search(question, top_k=5)
-        logs.append(f"KB: найдено контекста {len(context)} символов")
-        logger.info("KB search: question=%s, context_len=%d", question[:50], len(context))
+        budget_for_context = CTX_LIMIT - system_tokens - q_tokens - 400
+        budget_for_context = max(budget_for_context, 500)
 
-        system = f"{SYSTEM_PROMPT}\n\nКонтекст:\n{context}"
-        logs.append("LLM: отправка запроса...")
+        top_k = 3 if budget_for_context > 1500 else 2
+        context = self._kb.search(question, top_k=top_k)
+        ctx_tokens = int(len(context) * TOKENS_PER_CHAR)
 
-        answer, llm_logs = await self._llm.chat(system, question)
-        logs.extend(llm_logs)
+        if ctx_tokens > budget_for_context:
+            char_limit = int(budget_for_context / TOKENS_PER_CHAR)
+            context = context[:char_limit]
+            ctx_tokens = int(len(context) * TOKENS_PER_CHAR)
 
-        if not answer:
-            answer = "Модель не вернула ответ. Попробуйте переформулировать вопрос."
-            logs.append("Результат: пустой ответ, подставлен fallback")
-        else:
-            logs.append(f"Результат: ответ {len(answer)} символов")
+        input_tokens = system_tokens + ctx_tokens + q_tokens
+        num_predict = min(CTX_LIMIT - input_tokens, 800)
+        num_predict = max(num_predict, 200)
 
-        return answer, logs
+        tps = 3.0
+        est_seconds = int(input_tokens / 50 + num_predict / tps)
+
+        return {
+            "context": context,
+            "num_predict": num_predict,
+            "input_tokens": input_tokens,
+            "est_seconds": est_seconds,
+            "top_k": top_k,
+        }
 
     async def ask_stream(self, question: str) -> AsyncGenerator[str, None]:
         logs: list[str] = []
@@ -50,21 +62,30 @@ class AssistantService:
         yield self._event("log", "Поиск в базе знаний...")
 
         logs.append(f"Вопрос: {question[:100]}")
-        context = self._kb.search(question, top_k=5)
-        logs.append(f"KB: найдено контекста {len(context)} символов")
+        plan = self._estimate(question)
+        logs.append(f"KB: top_k={plan['top_k']}, контекст {len(plan['context'])} симв")
+        logs.append(f"Бюджет: ~{plan['input_tokens']} input tok, {plan['num_predict']} max output tok")
 
-        yield self._event("log", f"Найдено {len(context)} символов контекста")
-        yield self._event("log", "Отправка запроса в LLM...")
+        yield self._event("log", f"Контекст: {len(plan['context'])} симв, лимит ответа: {plan['num_predict']} tok")
+        yield self._event("estimate", str(plan["est_seconds"]))
+        yield self._event("log", "Генерация ответа...")
 
-        system = f"{SYSTEM_PROMPT}\n\nКонтекст:\n{context}"
-        answer, llm_logs = await self._llm.chat(system, question)
+        system = f"{SYSTEM_PROMPT}\n\nКонтекст:\n{plan['context']}"
+        answer, llm_logs = await self._llm.chat(system, question, num_predict=plan["num_predict"])
         logs.extend(llm_logs)
 
+        truncated = False
         if not answer:
             answer = "Модель не вернула ответ. Попробуйте переформулировать вопрос."
-            logs.append("Результат: пустой ответ, подставлен fallback")
+            logs.append("Результат: пустой, fallback")
         else:
-            logs.append(f"Результат: ответ {len(answer)} символов")
+            if not answer.endswith((".", "!", "?", "»")):
+                last_dot = max(answer.rfind("."), answer.rfind("!"), answer.rfind("?"))
+                if last_dot > len(answer) // 3:
+                    answer = answer[: last_dot + 1]
+                    truncated = True
+                    logs.append("Результат: обрезан до последнего предложения")
+            logs.append(f"Результат: {len(answer)} симв" + (" (обрезан)" if truncated else ""))
 
         yield self._event("done", answer, logs)
 

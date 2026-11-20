@@ -11,6 +11,7 @@ export function chat() {
     loading: false,
     error: "",
     elapsed: 0,
+    estimate: 0,
     status: "",
     lastLogs: [],
     showLogs: false,
@@ -26,14 +27,17 @@ export function chat() {
       this.status = "Подключение...";
       this.loading = true;
       this.elapsed = 0;
+      this.estimate = 0;
       this.lastLogs = [];
+      this.showLogs = false;
       this.scrollDown();
 
       this._timer = setInterval(() => { this.elapsed++; }, 1000);
 
       try {
-        const result = await sendQuestionStream(text, (s) => {
-          this.status = s;
+        const result = await sendQuestionStream(text, {
+          onStatus: (s) => { this.status = s; },
+          onEstimate: (sec) => { this.estimate = sec; },
         });
         this.messages.push({ role: "assistant", text: result.answer });
         this.lastLogs = result.logs;
