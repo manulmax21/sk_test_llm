@@ -10,6 +10,8 @@ export function chat() {
     input: "",
     loading: false,
     error: "",
+    elapsed: 0,
+    _timer: null,
 
     async send() {
       const text = this.input.trim();
@@ -19,7 +21,10 @@ export function chat() {
       this.input = "";
       this.error = "";
       this.loading = true;
+      this.elapsed = 0;
       this.scrollDown();
+
+      this._timer = setInterval(() => { this.elapsed++; }, 1000);
 
       try {
         const answer = await sendQuestion(text);
@@ -27,6 +32,8 @@ export function chat() {
       } catch (e) {
         this.error = e.message || "Не удалось получить ответ";
       } finally {
+        clearInterval(this._timer);
+        this._timer = null;
         this.loading = false;
         this.scrollDown();
         this.$nextTick(() => this.$refs.input?.focus());

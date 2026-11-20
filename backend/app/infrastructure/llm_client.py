@@ -22,6 +22,11 @@ class OllamaClient:
                             {"role": "user", "content": user},
                         ],
                         "stream": False,
+                        "options": {
+                            "num_predict": 300,
+                            "num_ctx": 4096,
+                            "temperature": 0.3,
+                        },
                     },
                 )
                 resp.raise_for_status()
