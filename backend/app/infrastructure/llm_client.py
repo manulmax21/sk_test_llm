@@ -16,8 +16,8 @@ class OllamaClient:
 
     async def chat(self, system: str, user: str) -> tuple[str, list[str]]:
         logs: list[str] = []
-        logs.append(f"LLM: модель {self._model}, URL {self._base_url}")
-        logs.append(f"LLM: system prompt {len(system)} символов, вопрос {len(user)} символов")
+        logs.append(f"LLM: модель {self._model}")
+        logs.append(f"LLM: system {len(system)} симв, вопрос {len(user)} симв")
         logger.info("Запрос к Ollama: model=%s, system_len=%d, user_len=%d", self._model, len(system), len(user))
 
         start = time.time()
@@ -29,45 +29,45 @@ class OllamaClient:
                         "model": self._model,
                         "messages": [
                             {"role": "system", "content": system},
-                            {"role": "user", "content": user},
+                            {"role": "user", "content": "/no_think " + user},
                         ],
                         "stream": False,
                         "options": {
-                            "num_predict": 300,
+                            "num_predict": 500,
                             "num_ctx": 4096,
                             "temperature": 0.3,
                         },
                     },
                 )
                 elapsed = round(time.time() - start, 1)
-                logs.append(f"LLM: HTTP {resp.status_code}, время {elapsed} сек")
+                logs.append(f"LLM: HTTP {resp.status_code}, {elapsed} сек")
                 logger.info("Ответ Ollama: status=%d, elapsed=%.1fs", resp.status_code, elapsed)
 
                 resp.raise_for_status()
                 data = resp.json()
 
                 raw = data.get("message", {}).get("content", "")
-                logs.append(f"LLM: raw ответ {len(raw)} символов")
+                logs.append(f"LLM: raw {len(raw)} симв")
 
                 if data.get("eval_count"):
                     tokens = data["eval_count"]
                     tps = round(tokens / elapsed, 1) if elapsed > 0 else 0
-                    logs.append(f"LLM: {tokens} токенов, {tps} tok/s")
+                    logs.append(f"LLM: {tokens} tok, {tps} tok/s")
 
                 answer = _THINK_RE.sub("", raw).strip()
-                if not answer:
-                    logs.append("LLM: ответ пуст после очистки thinking-тегов")
-                    logger.warning("Пустой ответ после очистки: raw_len=%d", len(raw))
+                if not answer and raw:
+                    logs.append("LLM: thinking съел весь ответ, возвращаю raw")
+                    answer = raw.strip()
 
                 return answer, logs
 
             except httpx.ConnectError as e:
-                logs.append(f"LLM: ошибка подключения — {e}")
+                logs.append(f"LLM: ошибка — {e}")
                 logger.error("ConnectError: %s", e)
                 raise ConnectionError(f"Ollama недоступен: {e}") from e
             except httpx.HTTPStatusError as e:
                 elapsed = round(time.time() - start, 1)
                 body = e.response.text[:300]
-                logs.append(f"LLM: HTTP ошибка {e.response.status_code} за {elapsed} сек — {body}")
+                logs.append(f"LLM: HTTP {e.response.status_code}, {elapsed} сек — {body}")
                 logger.error("HTTP %d: %s", e.response.status_code, body)
                 raise
