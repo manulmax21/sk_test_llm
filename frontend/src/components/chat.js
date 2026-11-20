@@ -1,8 +1,12 @@
 import { sendQuestion } from "../api/client.js";
 
+const WELCOME_MESSAGE =
+  "Здравствуйте! Я — ассистент контакт-центра. " +
+  "Задайте вопрос по теме банкротства или юриспруденции, и я постараюсь помочь.";
+
 export function chat() {
   return {
-    messages: [],
+    messages: [{ role: "assistant", text: WELCOME_MESSAGE }],
     input: "",
     loading: false,
     error: "",

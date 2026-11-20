@@ -1,4 +1,8 @@
+import re
+
 import httpx
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 class OllamaClient:
@@ -7,7 +11,7 @@ class OllamaClient:
         self._model = model
 
     async def chat(self, system: str, user: str) -> str:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             try:
                 resp = await client.post(
                     f"{self._base_url}/api/chat",
@@ -21,6 +25,7 @@ class OllamaClient:
                     },
                 )
                 resp.raise_for_status()
-                return resp.json()["message"]["content"]
+                raw = resp.json()["message"]["content"]
+                return _THINK_RE.sub("", raw).strip()
             except httpx.ConnectError as e:
                 raise ConnectionError(f"Ollama недоступен: {e}") from e
