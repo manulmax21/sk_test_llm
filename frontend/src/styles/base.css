@@ -1,0 +1,8 @@
+[x-cloak] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+}
