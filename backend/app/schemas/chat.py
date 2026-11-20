@@ -7,3 +7,4 @@ class QuestionRequest(BaseModel):
 
 class AnswerResponse(BaseModel):
     answer: str
+    logs: list[str] = []
