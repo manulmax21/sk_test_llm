@@ -35,7 +35,12 @@ export async function sendQuestionStream(question, { onStatus, onEstimate }) {
         }
 
         if (event.type === "estimate" && onEstimate) {
-          onEstimate(parseInt(event.message, 10));
+          try {
+            const info = JSON.parse(event.message);
+            onEstimate(info);
+          } catch {
+            onEstimate({ seconds: parseInt(event.message, 10), complexity: "medium" });
+          }
         }
 
         if (event.type === "done") {

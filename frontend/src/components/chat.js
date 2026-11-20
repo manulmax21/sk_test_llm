@@ -4,6 +4,12 @@ const WELCOME_MESSAGE =
   "Здравствуйте! Я — ассистент контакт-центра. " +
   "Задайте вопрос по теме банкротства или юриспруденции, и я постараюсь помочь.";
 
+const COMPLEXITY_LABELS = {
+  easy: "Простой вопрос",
+  medium: "Вопрос средней сложности",
+  hard: "Сложный вопрос",
+};
+
 export function chat() {
   return {
     messages: [{ role: "assistant", text: WELCOME_MESSAGE }],
@@ -12,10 +18,25 @@ export function chat() {
     error: "",
     elapsed: 0,
     estimate: 0,
+    complexity: "",
     status: "",
     lastLogs: [],
     showLogs: false,
     _timer: null,
+
+    get waitLabel() {
+      const label = COMPLEXITY_LABELS[this.complexity] || "";
+      const est = this.estimate;
+      if (!est) return label || "Обработка...";
+
+      const timeStr = est < 60
+        ? `около ${est} секунд`
+        : `около ${Math.ceil(est / 60)} минут`;
+
+      return label
+        ? `${label} — ожидание ${timeStr}`
+        : `Ожидание ${timeStr}`;
+    },
 
     async send() {
       const text = this.input.trim();
@@ -28,6 +49,7 @@ export function chat() {
       this.loading = true;
       this.elapsed = 0;
       this.estimate = 0;
+      this.complexity = "";
       this.lastLogs = [];
       this.showLogs = false;
       this.scrollDown();
@@ -37,7 +59,10 @@ export function chat() {
       try {
         const result = await sendQuestionStream(text, {
           onStatus: (s) => { this.status = s; },
-          onEstimate: (sec) => { this.estimate = sec; },
+          onEstimate: (info) => {
+            this.estimate = info.seconds || 0;
+            this.complexity = info.complexity || "";
+          },
         });
         this.messages.push({ role: "assistant", text: result.answer });
         this.lastLogs = result.logs;
