@@ -1,10 +1,10 @@
 const API_URL = import.meta.env.VITE_API_URL || "";
 
-export async function sendQuestionStream(question, { onStatus, onEstimate }) {
+export async function sendQuestionStream(question, { onStatus, onEstimate, onSession, sessionId = "" }) {
   const resp = await fetch(`${API_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, session_id: sessionId }),
   });
 
   if (!resp.ok) {
@@ -29,6 +29,10 @@ export async function sendQuestionStream(question, { onStatus, onEstimate }) {
       if (!line.startsWith("data: ")) continue;
       try {
         const event = JSON.parse(line.slice(6));
+
+        if (event.type === "session" && onSession) {
+          onSession(event.session_id);
+        }
 
         if (event.type === "log" && onStatus) {
           onStatus(event.message);

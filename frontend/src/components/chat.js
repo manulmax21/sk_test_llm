@@ -24,6 +24,7 @@ export function chat() {
     status: "",
     lastLogs: [],
     showLogs: false,
+    sessionId: "",
     _timer: null,
 
     get waitLabel() {
@@ -65,6 +66,8 @@ export function chat() {
             this.estimate = info.seconds || 0;
             this.complexity = info.complexity || "";
           },
+          onSession: (id) => { this.sessionId = id; },
+          sessionId: this.sessionId,
         });
         this.messages.push({ role: "assistant", text: result.answer });
         this.lastLogs = result.logs;

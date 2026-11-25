@@ -14,10 +14,22 @@ class OllamaClient:
         self._base_url = base_url
         self._model = model
 
-    async def chat(self, system: str, user: str, num_predict: int = 500) -> tuple[str, list[str]]:
+    async def chat(
+        self,
+        system: str,
+        user: str,
+        num_predict: int = 500,
+        history: list[dict] | None = None,
+    ) -> tuple[str, list[str]]:
         logs: list[str] = []
         logs.append(f"LLM: модель {self._model}, num_predict={num_predict}")
         logs.append(f"LLM: system {len(system)} симв, вопрос {len(user)} симв")
+
+        messages = [{"role": "system", "content": system}]
+        if history:
+            messages.extend(history)
+            logs.append(f"LLM: история {len(history)} сообщений")
+        messages.append({"role": "user", "content": "/no_think " + user})
 
         start = time.time()
         async with httpx.AsyncClient(timeout=None) as client:
@@ -26,10 +38,7 @@ class OllamaClient:
                     f"{self._base_url}/api/chat",
                     json={
                         "model": self._model,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": "/no_think " + user},
-                        ],
+                        "messages": messages,
                         "stream": False,
                         "options": {
                             "num_predict": num_predict,
@@ -71,4 +80,4 @@ class OllamaClient:
                 raise
 
 
-CTX_LIMIT = 4096
+CTX_LIMIT = 8192

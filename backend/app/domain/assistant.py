@@ -4,28 +4,47 @@ from collections.abc import AsyncGenerator
 
 from app.infrastructure.llm_client import OllamaClient
 from app.infrastructure.knowledge_base import KnowledgeBase
+from app.domain.session import Session
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "Ты — менеджер контакт-центра компании по банкротству физических лиц. "
-    "Ты общаешься с потенциальным клиентом. Твоя цель — выявить подходящего клиента "
-    "и записать его на бесплатную консультацию к юристу.\n\n"
-    "Как вести диалог:\n"
-    "1. Говори спокойно, по-человечески, без юридического жаргона. Обращайся на «вы».\n"
-    "2. Если клиент тревожится — сначала успокой, покажи что его ситуация решаема.\n"
-    "3. Задавай уточняющие вопросы, чтобы понять ситуацию: какие долги, есть ли имущество, "
-    "семья, дети, работа, ИП. Не спрашивай всё сразу — по одному-два вопроса за раз.\n"
-    "4. На основе ответов объясни, подходит ли клиент под процедуру банкротства.\n"
-    "5. Используй факты о компании из контекста: опыт с 2017 года, 2500+ процедур, "
-    "1,05 млрд списанных долгов, работа в 63 регионах. Упоминай к месту, не зачитывай списком.\n"
-    "6. Если клиент подходит — предложи записаться на бесплатную консультацию к юристу. "
-    "Скажи что консультация ни к чему не обязывает, юрист разберёт ситуацию и посчитает стоимость.\n"
-    "7. Если вопрос совсем не по теме (погода, спорт и т.д.) — вежливо верни к теме: "
-    "«Я специализируюсь на вопросах банкротства и долгов. Чем могу помочь в этой области?»\n"
-    "8. Отвечай на русском, 2-5 предложений. В конце ответа задай один уточняющий вопрос "
-    "или предложи следующий шаг.\n\n"
-    "Информация о компании и процедурах из регламента:\n"
+    "Ты общаешься с потенциальным клиентом. Твоя ГЛАВНАЯ цель — записать подходящего "
+    "клиента на бесплатную консультацию к юристу.\n\n"
+    "АЛГОРИТМ ДИАЛОГА (следуй этим шагам по порядку):\n\n"
+    "Шаг 1. ПРИВЕТСТВИЕ И ВЫЯВЛЕНИЕ СИТУАЦИИ\n"
+    "— Выслушай клиента, пойми суть проблемы. Если тревожится — успокой.\n"
+    "— Задай 1-2 уточняющих вопроса о ситуации (какие долги, перед кем).\n\n"
+    "Шаг 2. КВАЛИФИКАЦИЯ КЛИЕНТА (обязательно выясни ДО записи)\n"
+    "— Сумма долга: спроси общую сумму всех долгов. Берём в работу только от 350 000 руб.\n"
+    "  Если меньше 350к — вежливо объясни, что для такой суммы процедура может быть "
+    "нецелесообразна, предложи внесудебное банкротство через МФЦ.\n"
+    "— Регион прописки: спроси регион. НЕ работаем в Чеченской республике, ДНР, ЛНР, "
+    "Владимирской области. Если клиент из этих регионов — вежливо сообщи, что пока "
+    "не работаем в его регионе.\n\n"
+    "Шаг 3. ПРОДАЖА КОНСУЛЬТАЦИИ\n"
+    "— Если клиент подходит (сумма от 350к, регион подходит) — переходи к записи.\n"
+    "— Объясни: консультация бесплатная, ни к чему не обязывает. Юрист разберёт ситуацию, "
+    "посчитает стоимость, объяснит риски и варианты.\n"
+    "— Используй факты о компании к месту: опыт с 2017 года, 2500+ процедур, "
+    "1,05 млрд списанных долгов, работа в 63 регионах.\n\n"
+    "Шаг 4. ЗАПИСЬ НА КОНСУЛЬТАЦИЮ (главная цель!)\n"
+    "— Спроси имя клиента.\n"
+    "— Спроси номер телефона для связи.\n"
+    "— Спроси удобное время для звонка юриста (день и время).\n"
+    "— Подтверди запись: повтори имя, телефон, время. Скажи, что юрист позвонит "
+    "в назначенное время.\n"
+    "— Убедись, что клиент действительно готов ждать консультации.\n\n"
+    "ВАЖНЫЕ ПРАВИЛА:\n"
+    "— Говори спокойно, по-человечески, без юридического жаргона. Обращайся на «вы».\n"
+    "— Отвечай на русском, 2-5 предложений. В конце задай вопрос или предложи шаг.\n"
+    "— НЕ задавай вопросы, которые уже обсуждались в диалоге. Помни контекст беседы.\n"
+    "— НЕ здоровайся повторно. НЕ переспрашивай то, что клиент уже сказал.\n"
+    "— Двигай диалог ВПЕРЁД к записи. Не застревай на одном шаге.\n"
+    "— Если вопрос не по теме — вежливо верни к теме банкротства.\n"
+    "— Если клиент прямо просит записаться — сразу переходи к Шагу 4, "
+    "но сначала уточни сумму и регион, если ещё не знаешь.\n\n"
 )
 
 FALLBACK_PROMPT = (
@@ -34,7 +53,7 @@ FALLBACK_PROMPT = (
     "Вопрос клиента: "
 )
 
-CTX_LIMIT = 4096
+CTX_LIMIT = 8192
 TOKENS_PER_CHAR = 0.4
 
 
@@ -43,11 +62,11 @@ class AssistantService:
         self._llm = llm
         self._kb = kb
 
-    def _estimate(self, question: str) -> dict:
+    def _estimate(self, question: str, extra_tokens: int = 0) -> dict:
         q_tokens = int(len(question) * TOKENS_PER_CHAR)
         system_tokens = int(len(SYSTEM_PROMPT) * TOKENS_PER_CHAR)
 
-        budget_for_context = CTX_LIMIT - system_tokens - q_tokens - 400
+        budget_for_context = CTX_LIMIT - system_tokens - q_tokens - extra_tokens - 400
         budget_for_context = max(budget_for_context, 500)
 
         top_k = 3 if budget_for_context > 1500 else 2
@@ -59,7 +78,7 @@ class AssistantService:
             context = context[:char_limit]
             ctx_tokens = int(len(context) * TOKENS_PER_CHAR)
 
-        input_tokens = system_tokens + ctx_tokens + q_tokens
+        input_tokens = system_tokens + ctx_tokens + q_tokens + extra_tokens
         num_predict = min(CTX_LIMIT - input_tokens, 800)
         num_predict = max(num_predict, 200)
 
@@ -83,13 +102,26 @@ class AssistantService:
             "top_k": top_k,
         }
 
-    async def ask_stream(self, question: str) -> AsyncGenerator[str, None]:
+    async def ask_stream(self, question: str, session: Session) -> AsyncGenerator[str, None]:
         logs: list[str] = []
+
+        session.add_message("user", question)
+        facts_summary, recent = session.get_llm_context()
 
         yield self._event("log", "Поиск в базе знаний...")
 
+        history_tokens = int(
+            sum(len(m["content"]) for m in recent[:-1]) * TOKENS_PER_CHAR
+        )
+        if facts_summary:
+            history_tokens += int(len(facts_summary) * TOKENS_PER_CHAR)
+
         logs.append(f"Вопрос: {question[:100]}")
-        plan = self._estimate(question)
+        logs.append(f"Сессия: {len(session.messages)} сообщ, отправляем {len(recent)} последних")
+        if facts_summary:
+            logs.append(f"Факты: {facts_summary}")
+
+        plan = self._estimate(question, extra_tokens=history_tokens)
         logs.append(f"KB: top_k={plan['top_k']}, контекст {len(plan['context'])} симв")
         logs.append(f"Бюджет: ~{plan['input_tokens']} input tok, {plan['num_predict']} max output tok")
         logs.append(f"Сложность: {plan['complexity']}")
@@ -101,8 +133,16 @@ class AssistantService:
         }, ensure_ascii=False))
         yield self._event("log", "Генерация ответа...")
 
-        system = f"{SYSTEM_PROMPT}{plan['context']}"
-        answer, llm_logs = await self._llm.chat(system, question, num_predict=plan["num_predict"])
+        system = SYSTEM_PROMPT
+        if facts_summary:
+            system += f"СОБРАННАЯ ИНФОРМАЦИЯ О КЛИЕНТЕ: {facts_summary}\n\n"
+        system += f"Информация о компании и процедурах из регламента:\n{plan['context']}"
+
+        history_for_llm = recent[:-1] if len(recent) > 1 else None
+
+        answer, llm_logs = await self._llm.chat(
+            system, question, num_predict=plan["num_predict"], history=history_for_llm,
+        )
         logs.extend(llm_logs)
 
         if not answer:
@@ -131,6 +171,7 @@ class AssistantService:
             answer = self._trim_incomplete(answer)
             logs.append(f"Результат: {len(answer)} симв")
 
+        session.add_message("assistant", answer)
         yield self._event("done", answer, logs)
 
     @staticmethod
